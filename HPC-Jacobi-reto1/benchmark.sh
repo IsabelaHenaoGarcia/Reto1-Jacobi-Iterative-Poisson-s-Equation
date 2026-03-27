@@ -2,13 +2,13 @@
 # =============================================================================
 # benchmark.sh  --  Poisson 1D Jacobi: convergence-based speedup study
 #
-# All binaries run until RMS residual < 1e-6. Speedup is always computed as
+# All binaries run until RMS residual < 1e-6. Speedp is always computed as
 # T(serial_std, n) / T(impl, n, p), read from data_serial.csv.
 #
 # One CSV per suite (mirrors the structure of the previous benchmark):
 #   results/data_serial.csv    -- serial_std, serial_opt, serial_cache
-#   results/data_threads.csv   -- threads(p=2,4,6,8)
-#   results/data_processes.csv -- processes(p=2,4,6,8), n <= PROC_MAX_N
+#   results/data_threads.csv   -- threads(p=2,4,8,12,16)
+#   results/data_processes.csv -- processes(p=2,4,8,12,16), n <= PROC_MAX_N
 #
 # CSV columns (all suites):
 #   suite, impl, parallelism, grid_size, repetition, wall_time_ms, iters_done
@@ -30,11 +30,12 @@ export LC_NUMERIC=C
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 RESULTS_DIR="results"
 
-GRID_SIZES=(100 200 500 1000 2000)
+GRID_SIZES=(33 65 129 257 513 1025)
+PROC_GRID_SIZES=(33 65 129 257 513)
 PROC_MAX_N=2000
-PARALLEL_COUNTS=(2 4 6 8 12)
-MAX_ITERS=20000000
-REPETITIONS=10 
+PARALLEL_COUNTS=(2 4 8 12 16)
+MAX_ITERS=5000000
+REPETITIONS=10
 
 CSV_SERIAL="${RESULTS_DIR}/data_serial.csv"
 CSV_THREADS="${RESULTS_DIR}/data_threads.csv"
@@ -220,13 +221,15 @@ run_once() {
 # ---------------------------------------------------------------------------
 measure_impl() {
     local csv="$1" suite="$2" impl="$3" bin="$4" par="$5" max_n="$6"
+    shift 6
+    local sizes_array=("$@")
 
     local label="${impl}"
     [[ "${par}" -gt 0 ]] && label="${impl}(p=${par})"
     log_section "Measuring: ${label}  [max_n=${max_n}]"
 
     for rep in $(seq 1 "${REPETITIONS}"); do
-        for size in "${GRID_SIZES[@]}"; do
+        for size in "${sizes_array[@]}"; do
             [[ "${size}" -gt "${max_n}" ]] && continue
 
             if [[ "$(row_exists "${csv}" "${impl}" "${par}" "${size}" "${rep}")" -gt 0 ]]; then
@@ -240,8 +243,8 @@ measure_impl() {
             ms=$(echo    "${result}" | cut -d' ' -f1)
             iters=$(echo "${result}" | cut -d' ' -f2)
             error=$(echo "${result}" | cut -d' ' -f3)
+
             printf "%-14s ms  iters=%-12s error=%s\n" "${ms}" "${iters}" "${error}"
-            [[ "${iters}" -ge "${MAX_ITERS}" ]] && echo "    [DID NOT CONVERGE]"
 
             write_row "${csv}" "${suite}" \
                       "${impl}" "${par}" "${size}" "${rep}" "${ms}" "${iters}" "${error}"
@@ -255,9 +258,9 @@ measure_impl() {
 run_suite_serial() {
     local max_n="${GRID_SIZES[-1]}"
     setup_csv "${CSV_SERIAL}"
-    measure_impl "${CSV_SERIAL}" "serial" "serial_std"   "./bin/serial_std"   0 "${max_n}"
-    measure_impl "${CSV_SERIAL}" "serial" "serial_opt"   "./bin/serial_opt"   0 "${max_n}"
-    measure_impl "${CSV_SERIAL}" "serial" "serial_cache" "./bin/serial_cache" 0 "${max_n}"
+    measure_impl "${CSV_SERIAL}" "serial" "serial_std"   "./bin/serial_std"   0 "${max_n}" "${GRID_SIZES[@]}"
+    measure_impl "${CSV_SERIAL}" "serial" "serial_opt"   "./bin/serial_opt"   0 "${max_n}" "${GRID_SIZES[@]}"
+    measure_impl "${CSV_SERIAL}" "serial" "serial_cache" "./bin/serial_cache" 0 "${max_n}" "${GRID_SIZES[@]}"
     print_summary_serial
 }
 
@@ -265,16 +268,16 @@ run_suite_threads() {
     local max_n="${GRID_SIZES[-1]}"
     setup_csv "${CSV_THREADS}"
     for p in "${PARALLEL_COUNTS[@]}"; do
-        measure_impl "${CSV_THREADS}" "threads" "threads" "./bin/threads" "${p}" "${max_n}"
+        measure_impl "${CSV_THREADS}" "threads" "threads" "./bin/threads" "${p}" "${max_n}" "${GRID_SIZES[@]}"
     done
     print_summary_threads
 }
 
 run_suite_procs() {
-    local max_n="${GRID_SIZES[-1]}"
+    local max_n="${PROC_GRID_SIZES[-1]}"
     setup_csv "${CSV_PROCS}"
     for p in "${PARALLEL_COUNTS[@]}"; do
-        measure_impl "${CSV_PROCS}" "processes" "processes" "./bin/processes" "${p}" "${max_n}"
+        measure_impl "${CSV_PROCS}" "processes" "processes" "./bin/processes" "${p}" "${max_n}" "${PROC_GRID_SIZES[@]}"
     done
     print_summary_procs
 }
@@ -382,7 +385,6 @@ def load(path):
         for r in csv.DictReader(f):
             key = (r['impl'], int(r['parallelism']), int(r['grid_size']))
             rows[key].append((float(r['wall_time_ms']), int(r['iters_done'])))
-
     return rows
 
 def avg(v): return sum(v)/len(v) if v else None
